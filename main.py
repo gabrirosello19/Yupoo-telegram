@@ -1,50 +1,22 @@
-import os
-import re
 import requests
-from bs4 import BeautifulSoup
 
-URL = "https://x.yupoo.com/photos/grandsuit/albums/253275416?uid=1&isSubCate=false&referrercate="
+url = "https://photo.yupoo.com/grandsuit/414a42e969/medium.jpeg"
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://x.yupoo.com/",
+    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
 }
 
-response = requests.get(URL, headers=headers, timeout=30)
-response.raise_for_status()
+r = requests.get(url, headers=headers, timeout=30)
 
-soup = BeautifulSoup(response.text, "html.parser")
-
-# Buscar únicamente imágenes de photo.yupoo.com
-found = []
-
-for img in soup.find_all("img"):
-    src = img.get("src") or img.get("data-src")
-
-    if src and "photo.yupoo.com" in src:
-        # Eliminar small/medium/square y pedir la versión grande
-        src = re.sub(r"/(small|square)\.jpeg$", "/medium.jpeg", src)
-
-        if src not in found:
-            found.append(src)
-
-print("FOTOS ENCONTRADAS:", len(found))
-
-os.makedirs("fotos", exist_ok=True)
-
-for i, url in enumerate(found, 1):
-    print(f"Descargando {i}: {url}")
-
-    r = requests.get(url, headers=headers, timeout=30)
-
-    if r.status_code == 200:
-        filename = f"fotos/foto_{i}.jpeg"
-
-        with open(filename, "wb") as f:
-            f.write(r.content)
-
-        print(f"OK -> {filename} ({len(r.content)} bytes)")
-    else:
-        print(f"ERROR {r.status_code}: {url}")
-
-print("PRUEBA TERMINADA")
+print("STATUS:", r.status_code)
+print("CONTENT-TYPE:", r.headers.get("content-type"))
+print("TAMAÑO:", len(r.content))
+print("SERVIDOR:", r.headers.get("server"))
+print("TEXTO:", r.text[:300] if "text" in r.headers.get("content-type", "") else "NO ES TEXTO")
