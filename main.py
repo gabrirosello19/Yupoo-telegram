@@ -23,7 +23,7 @@ for img in soup.find_all("img"):
 
     if src and "photo.yupoo.com" in src:
         # Eliminar small/medium/square y pedir la versión grande
-        src = re.sub(r"/(small|medium|square)\.jpeg$", "/big.jpeg", src)
+        src = re.sub(r"/(small|square)\.jpeg$", "/medium.jpeg", src)
 
         if src not in found:
             found.append(src)
