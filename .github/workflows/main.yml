@@ -1,0 +1,25 @@
+name: Prueba Yupoo
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar proyecto
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Probar Yupoo
+        run: |
+          python main.py
