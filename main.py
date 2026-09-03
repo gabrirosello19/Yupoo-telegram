@@ -1,11 +1,34 @@
+import os
+import json
 import re
+import time
 import requests
 
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, parse_qs, urlencode
+from urllib.parse import urljoin, urlparse, parse_qs
 
+
+# ============================================================
+# CONFIGURACIÓN
+# ============================================================
+
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+if not TOKEN:
+    raise Exception("Falta TELEGRAM_BOT_TOKEN")
+
+CANAL = "@urbansportspain"
 
 BASE_URL = "https://x.yupoo.com"
+
+MAX_PRODUCTS_PER_RUN = 5
+
+ARCHIVO_PUBLICADOS = "published.json"
+
+
+# ============================================================
+# CATEGORÍAS
+# ============================================================
 
 CATEGORIAS = [
     "https://x.yupoo.com/photos/grandsuit/categories/5108104",
@@ -19,6 +42,10 @@ CATEGORIAS = [
 ]
 
 
+# ============================================================
+# SESIÓN HTTP
+# ============================================================
+
 session = requests.Session()
 
 session.headers.update({
@@ -31,14 +58,69 @@ session.headers.update({
 })
 
 
+# ============================================================
+# PUBLICADOS
+# ============================================================
+
+def cargar_publicados():
+
+    if not os.path.exists(ARCHIVO_PUBLICADOS):
+        return []
+
+    try:
+
+        with open(
+            ARCHIVO_PUBLICADOS,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            datos = json.load(f)
+
+        if isinstance(datos, list):
+            return datos
+
+    except Exception as e:
+
+        print(
+            f"⚠️ Error leyendo published.json: {e}"
+        )
+
+    return []
+
+
+def guardar_publicados(publicados):
+
+    with open(
+        ARCHIVO_PUBLICADOS,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            publicados,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
+
+
+# ============================================================
+# OBTENER PÁGINA
+# ============================================================
+
 def obtener_soup(url):
+
+    print(f"🌐 Abriendo: {url}")
 
     respuesta = session.get(
         url,
         timeout=30
     )
 
-    print(f"      HTTP {respuesta.status_code} → {url}")
+    print(
+        f"   HTTP {respuesta.status_code}"
+    )
 
     respuesta.raise_for_status()
 
@@ -48,11 +130,18 @@ def obtener_soup(url):
     )
 
 
+# ============================================================
+# ENCONTRAR ÁLBUMES DE UNA PÁGINA
+# ============================================================
+
 def encontrar_albums(soup):
 
     albums = {}
 
-    for a in soup.find_all("a", href=True):
+    for a in soup.find_all(
+        "a",
+        href=True
+    ):
 
         href = a["href"]
 
@@ -75,108 +164,101 @@ def encontrar_albums(soup):
         album_id = match.group(1)
 
         if album_id not in albums:
+
+            # IMPORTANTE:
+            # Conservamos todos los parámetros
+            # de la URL original de Yupoo.
             albums[album_id] = album_url
 
     return albums
 
 
-def obtener_siguiente_pagina(soup, pagina_actual):
+# ============================================================
+# ENCONTRAR SIGUIENTE PÁGINA
+# ============================================================
+
+def encontrar_siguiente_pagina(
+    soup,
+    pagina_actual
+):
 
     candidatos = []
 
-    # Buscamos enlaces que contengan page=
-    for a in soup.find_all("a", href=True):
+    for a in soup.find_all(
+        "a",
+        href=True
+    ):
 
         href = a["href"]
 
         if "page=" not in href:
             continue
 
-        texto = a.get_text(
-            " ",
-            strip=True
-        )
-
         url = urljoin(
             BASE_URL,
             href
         )
 
-        candidatos.append(
-            (texto, url)
-        )
-
-    # Preferimos una página superior a la actual
-    for texto, url in candidatos:
-
         try:
 
             query = parse_qs(
                 urlparse(url).query
             )
 
-            paginas = query.get("page")
+            valores = query.get("page")
 
-            if not paginas:
+            if not valores:
                 continue
 
             numero = int(
-                paginas[0]
+                valores[0]
             )
 
-            if numero == pagina_actual + 1:
-                return url
+            candidatos.append(
+                (numero, url)
+            )
 
         except Exception:
+
             continue
 
-    # Si no encontramos exactamente la siguiente,
-    # buscamos cualquier página superior.
-    siguientes = []
+    # Buscamos exactamente la siguiente página
+    siguiente = [
+        x
+        for x in candidatos
+        if x[0] == pagina_actual + 1
+    ]
 
-    for texto, url in candidatos:
+    if siguiente:
 
-        try:
+        return siguiente[0][1]
 
-            query = parse_qs(
-                urlparse(url).query
-            )
+    # Si no aparece exactamente,
+    # buscamos la página superior más cercana.
+    superiores = [
+        x
+        for x in candidatos
+        if x[0] > pagina_actual
+    ]
 
-            paginas = query.get("page")
+    if superiores:
 
-            if not paginas:
-                continue
-
-            numero = int(
-                paginas[0]
-            )
-
-            if numero > pagina_actual:
-                siguientes.append(
-                    (numero, url)
-                )
-
-        except Exception:
-            continue
-
-    if siguientes:
-
-        siguientes.sort(
+        superiores.sort(
             key=lambda x: x[0]
         )
 
-        return siguientes[0][1]
+        return superiores[0][1]
 
     return None
 
 
-def analizar_categoria(categoria_url):
+# ============================================================
+# ENCONTRAR TODOS LOS ÁLBUMES DE UNA CATEGORÍA
+# ============================================================
 
-    print()
-    print("=" * 70)
-    print("📂 CATEGORÍA")
-    print(categoria_url)
-    print("=" * 70)
+def encontrar_albums_categoria(
+    categoria_url
+):
 
     todos = {}
 
@@ -186,16 +268,31 @@ def analizar_categoria(categoria_url):
 
     urls_visitadas = set()
 
+    print()
+    print("=" * 70)
+    print("📂 CATEGORÍA")
+    print(categoria_url)
+    print("=" * 70)
+
     while url_actual:
 
         if url_actual in urls_visitadas:
-            print("⚠️ URL repetida. Terminando categoría.")
+
+            print(
+                "⚠️ URL repetida. "
+                "Terminando categoría."
+            )
+
             break
 
-        urls_visitadas.add(url_actual)
+        urls_visitadas.add(
+            url_actual
+        )
 
         print()
-        print(f"📄 PÁGINA {pagina}")
+        print(
+            f"📄 PÁGINA {pagina}"
+        )
 
         try:
 
@@ -222,105 +319,13 @@ def analizar_categoria(categoria_url):
             if album_id not in todos:
 
                 todos[album_id] = album_url
+
                 nuevos += 1
 
         print(
-            f"   📦 Álbumes encontrados: {len(albums)}"
+            f"   📦 Álbumes encontrados: "
+            f"{len(albums)}"
         )
 
         print(
-            f"   🆕 Álbumes nuevos: {nuevos}"
-        )
-
-        print(
-            f"   📊 Total acumulado: {len(todos)}"
-        )
-
-        siguiente = obtener_siguiente_pagina(
-            soup,
-            pagina
-        )
-
-        if not siguiente:
-
-            print()
-            print(
-                "   ✅ No se ha encontrado más paginación."
-            )
-
-            break
-
-        print(
-            f"   ➡️ Siguiente página: {siguiente}"
-        )
-
-        url_actual = siguiente
-
-        pagina += 1
-
-        if pagina > 100:
-
-            print(
-                "⚠️ Límite de seguridad alcanzado."
-            )
-
-            break
-
-    print()
-    print(
-        f"🏁 TOTAL FINAL DE ESTA CATEGORÍA: "
-        f"{len(todos)}"
-    )
-
-    return todos
-
-
-def main():
-
-    total_general = {}
-
-    print()
-    print("🔎 DIAGNÓSTICO DEL CATÁLOGO YUPOO")
-    print("🚫 NO SE PUBLICARÁ NADA EN TELEGRAM")
-    print()
-
-    for categoria in CATEGORIAS:
-
-        try:
-
-            albums = analizar_categoria(
-                categoria
-            )
-
-            for album_id, album_url in albums.items():
-
-                total_general[album_id] = album_url
-
-        except Exception as e:
-
-            print(
-                f"❌ Error procesando categoría: {e}"
-            )
-
-    print()
-    print("=" * 70)
-    print("🏁 RESULTADO FINAL")
-    print("=" * 70)
-
-    print(
-        f"📦 TOTAL DE PRODUCTOS ÚNICOS: "
-        f"{len(total_general)}"
-    )
-
-    print()
-    print(
-        "🚫 No se ha enviado ningún producto a Telegram."
-    )
-    print(
-        "🚫 published.json no se ha modificado."
-    )
-    print("=" * 70)
-
-
-if __name__ == "__main__":
-    main()
+            f"   🆕 Álbumes nuevos: "
