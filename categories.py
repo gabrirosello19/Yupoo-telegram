@@ -1,8 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import re
 
-URL = "https://x.yupoo.com/photos/grandsuit/categories"
+BASE_URL = "https://x.yupoo.com/photos/grandsuit/categories"
 
 HEADERS = {
     "User-Agent": (
@@ -15,11 +16,32 @@ HEADERS = {
     "Referer": "https://x.yupoo.com/",
 }
 
-print("LEYENDO EL CATÁLOGO...")
-print("URL:", URL)
+# Categorías que queremos
+CATEGORIAS = [
+    "26/27 Club&National Men Kit (Fans Version)",
+    "26/27 Club&National Men Kit (Player Version)",
+    "26/27 Club&National Kids Kit",
+    "26/27 Club&National Lady Kit and Belly shirt",
+    "Retro Soccer jersey (S-2XL)",
+    "Retro Kids soccer uniform (AAA)",
+    "Adidas / Nike Soccer Jersey Set",
+    "2026 Branded Tracksuit",
+]
+
+
+def limpiar(texto):
+    return re.sub(r"\s+", " ", texto).strip().lower()
+
+
+print("==========================================")
+print(" BUSCADOR DE CATEGORÍAS YUPOO")
+print("==========================================")
+print()
+
+print("LEYENDO:", BASE_URL)
 
 response = requests.get(
-    URL,
+    BASE_URL,
     headers=HEADERS,
     timeout=30
 )
@@ -31,31 +53,75 @@ response.raise_for_status()
 
 soup = BeautifulSoup(response.text, "html.parser")
 
-print("\n===== ENLACES ENCONTRADOS =====\n")
-
-encontrados = []
+# Crear mapa nombre -> URL
+categorias_encontradas = {}
 
 for a in soup.find_all("a", href=True):
-
     texto = a.get_text(" ", strip=True)
-    href = urljoin(URL, a["href"])
 
     if not texto:
         continue
 
-    # Nos interesan enlaces que puedan llevar a categorías o álbumes
-    if (
-        "/albums/" in href
-        or "/categories/" in href
-        or "/photos/" in href
-    ):
-        item = (texto, href)
+    href = urljoin(BASE_URL, a["href"])
 
-        if item not in encontrados:
-            encontrados.append(item)
+    if "/categories/" not in href:
+        continue
 
-for i, (texto, href) in enumerate(encontrados, 1):
-    print(f"{i}. {texto}")
-    print(f"   {href}")
+    clave = limpiar(texto)
 
-print("\nTOTAL ENLACES:", len(encontrados))
+    if clave not in categorias_encontradas:
+        categorias_encontradas[clave] = (texto, href)
+
+
+print()
+print("==========================================")
+print(" CATEGORÍAS SELECCIONADAS")
+print("==========================================")
+print()
+
+seleccionadas = []
+
+for categoria in CATEGORIAS:
+
+    buscada = limpiar(categoria)
+
+    encontrada = None
+
+    # Coincidencia exacta
+    if buscada in categorias_encontradas:
+        encontrada = categorias_encontradas[buscada]
+    else:
+        # Coincidencia flexible
+        for clave, valor in categorias_encontradas.items():
+            if buscada in clave or clave in buscada:
+                encontrada = valor
+                break
+
+    if encontrada:
+        nombre, url = encontrada
+
+        print("✅", nombre)
+        print("   ", url)
+        print()
+
+        seleccionadas.append((nombre, url))
+
+    else:
+        print("❌ NO ENCONTRADA:", categoria)
+        print()
+
+
+print("==========================================")
+print(" RESUMEN")
+print("==========================================")
+print()
+
+print("Categorías solicitadas:", len(CATEGORIAS))
+print("Categorías encontradas:", len(seleccionadas))
+
+print()
+
+if not seleccionadas:
+    print("⚠️ NO SE ENCONTRÓ NINGUNA CATEGORÍA.")
+else:
+    print("TODO CORRECTO.")
