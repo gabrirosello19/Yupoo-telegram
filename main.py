@@ -1,15 +1,23 @@
 import os
+import json
 import re
+import time
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
-YUPOO_URL = (
-    "https://x.yupoo.com/photos/grandsuit/albums/253275416"
-    "?uid=1&isSubCate=false&referrercate="
-)
+# ============================================================
+# CONFIGURACIÓN
+# ============================================================
 
-TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = "@urbansportspain"
+
+BASE_URL = "https://x.yupoo.com/photos/grandsuit"
+
+MAX_PRODUCTS_PER_RUN = 5
+
+PUBLISHED_FILE = "published.json"
 
 HEADERS = {
     "User-Agent": (
@@ -17,162 +25,120 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/131.0.0.0 Safari/537.36"
     ),
-    "Referer": "https://x.yupoo.com/",
     "Accept": (
-        "image/avif,image/webp,image/apng,image/svg+xml,"
-        "image/*,*/*;q=0.8"
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
     ),
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-}
-
-PAGE_HEADERS = {
-    "User-Agent": HEADERS["User-Agent"],
+    "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://x.yupoo.com/",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
 }
 
+IMAGE_HEADERS = {
+    "User-Agent": HEADERS["User-Agent"],
+    "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    "Referer": "https://x.yupoo.com/",
+}
 
-def get_album_images():
-    response = requests.get(
-        YUPOO_URL,
-        headers=PAGE_HEADERS,
-        timeout=30
-    )
-    response.raise_for_status()
+# ============================================================
+# CATEGORÍAS
+# ============================================================
 
-    soup = BeautifulSoup(response.text, "html.parser")
+CATEGORIES = [
+    "https://x.yupoo.com/photos/grandsuit/categories/5108104",
+    "https://x.yupoo.com/photos/grandsuit/categories/5108105",
+    "https://x.yupoo.com/photos/grandsuit/categories/5108112",
+    "https://x.yupoo.com/photos/grandsuit/categories/5108233",
+    "https://x.yupoo.com/photos/grandsuit/categories/18555",
+    "https://x.yupoo.com/photos/grandsuit/categories/3475202",
+    "https://x.yupoo.com/photos/grandsuit/categories/18559",
+    "https://x.yupoo.com/photos/grandsuit/categories/3904699",
+]
 
-    images = []
+# ============================================================
+# FUNCIONES
+# ============================================================
 
-    for img in soup.find_all("img"):
-        src = img.get("src") or img.get("data-src")
-
-        if not src:
-            continue
-
-        if "photo.yupoo.com" not in src:
-            continue
-
-        # Nos quedamos con la versión medium, que ya hemos comprobado
-        # que Yupoo permite descargar correctamente.
-        src = re.sub(
-            r"/(small|square)\.jpeg$",
-            "/medium.jpeg",
-            src
-        )
-
-        if src not in images:
-            images.append(src)
-
-    return images
+def limpiar(texto):
+    return re.sub(r"\s+", " ", texto).strip()
 
 
-def download_images(urls):
-    os.makedirs("fotos", exist_ok=True)
-
-    files = []
-
-    for number, url in enumerate(urls, 1):
-        print(f"Descargando {number}/{len(urls)}")
-
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=30
-        )
-
-        response.raise_for_status()
-
-        filename = f"fotos/foto_{number}.jpg"
-
-        with open(filename, "wb") as file:
-            file.write(response.content)
-
-        print(
-            f"OK: {filename} "
-            f"({len(response.content)} bytes)"
-        )
-
-        files.append(filename)
-
-    return files
-
-
-def send_album(files):
-    url = (
-        f"https://api.telegram.org/bot"
-        f"{TELEGRAM_TOKEN}/sendMediaGroup"
-    )
-
-    media = []
-
-    for index, filename in enumerate(files):
-        item = {
-            "type": "photo",
-            "media": f"attach://photo{index}"
-        }
-
-        # Solo ponemos el texto en la primera foto.
-        if index == 0:
-            item["caption"] = (
-                "🔥 NUEVO PRODUCTO\n\n"
-                "📸 Catálogo Grandsuit\n\n"
-                "Más información por privado."
-            )
-
-        media.append(item)
-
-    data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "media": str(media).replace("'", '"')
-    }
-
-    opened_files = {}
+def cargar_publicados():
+    if not os.path.exists(PUBLISHED_FILE):
+        return set()
 
     try:
-        for index, filename in enumerate(files):
-            opened_files[f"photo{index}"] = open(
-                filename,
-                "rb"
-            )
+        with open(PUBLISHED_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-        response = requests.post(
-            url,
-            data=data,
-            files=opened_files,
-            timeout=120
+        if isinstance(data, list):
+            return set(str(x) for x in data)
+
+        return set()
+
+    except Exception:
+        return set()
+
+
+def guardar_publicados(publicados):
+    with open(PUBLISHED_FILE, "w", encoding="utf-8") as f:
+        json.dump(
+            sorted(list(publicados)),
+            f,
+            ensure_ascii=False,
+            indent=2
         )
 
-        print("TELEGRAM STATUS:", response.status_code)
-        print("TELEGRAM RESPONSE:", response.text)
 
-        response.raise_for_status()
+def obtener_pagina(url):
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=30
+    )
 
-    finally:
-        for file in opened_files.values():
-            file.close()
+    print("GET:", url)
+    print("HTTP:", response.status_code)
 
+    response.raise_for_status()
 
-def main():
-    print("=== YUPOO → TELEGRAM ===")
-
-    images = get_album_images()
-
-    print(f"FOTOS ENCONTRADAS: {len(images)}")
-
-    if not images:
-        raise RuntimeError(
-            "No se encontraron fotos en el álbum."
-        )
-
-    files = download_images(images)
-
-    print("FOTOS DESCARGADAS:", len(files))
-
-    send_album(files)
-
-    print("=== PUBLICACIÓN COMPLETADA ===")
+    return BeautifulSoup(response.text, "html.parser")
 
 
-if __name__ == "__main__":
-    main()
+def encontrar_albums(url):
+    """
+    Busca todos los enlaces /albums/ dentro de una categoría.
+    También intenta seguir paginación.
+    """
+
+    albums = set()
+    paginas_visitadas = set()
+
+    pagina_url = url
+
+    while pagina_url and pagina_url not in paginas_visitadas:
+
+        paginas_visitadas.add(pagina_url)
+
+        try:
+            soup = obtener_pagina(pagina_url)
+        except Exception as e:
+            print("❌ Error leyendo categoría:", e)
+            break
+
+        # Buscar álbumes
+        for a in soup.find_all("a", href=True):
+
+            href = a["href"]
+
+            if "/albums/" not in href:
+                continue
+
+            album_url = urljoin(BASE_URL, href)
+
+            # Limpiar parámetros innecesarios
+            album_url = album_url.split("?")[0]
+
+            match = re.search(r"/albums/(\d+)", album_url)
+
+            if match:
+               
