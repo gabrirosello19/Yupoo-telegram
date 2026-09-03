@@ -34,7 +34,10 @@ HEADERS = {
 
 IMAGE_HEADERS = {
     "User-Agent": HEADERS["User-Agent"],
-    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Accept": (
+        "image/avif,image/webp,image/apng,"
+        "image/*,*/*;q=0.8"
+    ),
     "Referer": "https://x.yupoo.com/",
 }
 
@@ -54,29 +57,51 @@ CATEGORIES = [
 ]
 
 # ============================================================
-# ARCHIVO DE PRODUCTOS PUBLICADOS
+# PRODUCTOS PUBLICADOS
 # ============================================================
 
 def cargar_publicados():
+
     if not os.path.exists(PUBLISHED_FILE):
         return set()
 
     try:
-        with open(PUBLISHED_FILE, "r", encoding="utf-8") as f:
+
+        with open(
+            PUBLISHED_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
             data = json.load(f)
 
         if isinstance(data, list):
-            return set(str(x) for x in data)
+
+            return set(
+                str(x)
+                for x in data
+            )
 
         return set()
 
     except Exception as e:
-        print("⚠️ No se pudo leer published.json:", e)
+
+        print(
+            "⚠️ Error leyendo published.json:",
+            e
+        )
+
         return set()
 
 
 def guardar_publicados(publicados):
-    with open(PUBLISHED_FILE, "w", encoding="utf-8") as f:
+
+    with open(
+        PUBLISHED_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
         json.dump(
             sorted(list(publicados)),
             f,
@@ -89,6 +114,7 @@ def guardar_publicados(publicados):
 # ============================================================
 
 def obtener_soup(url):
+
     print()
     print("GET:", url)
 
@@ -98,54 +124,98 @@ def obtener_soup(url):
         timeout=30
     )
 
-    print("HTTP:", response.status_code)
+    print(
+        "HTTP:",
+        response.status_code
+    )
 
     response.raise_for_status()
 
-    return BeautifulSoup(response.text, "html.parser")
+    return BeautifulSoup(
+        response.text,
+        "html.parser"
+    )
 
 
 def encontrar_albums(categoria_url):
-    albums = set()
+
+    albums = {}
 
     try:
-        soup = obtener_soup(categoria_url)
+
+        soup = obtener_soup(
+            categoria_url
+        )
+
     except Exception as e:
-        print("❌ Error leyendo categoría:", e)
+
+        print(
+            "❌ Error leyendo categoría:",
+            e
+        )
+
         return albums
 
-    for a in soup.find_all("a", href=True):
+    for a in soup.find_all(
+        "a",
+        href=True
+    ):
 
         href = a["href"]
 
         if "/albums/" not in href:
             continue
 
-        album_url = urljoin(BASE_URL, href)
-        album_url = album_url.split("?")[0]
+        # IMPORTANTE:
+        # Conservamos los parámetros originales
+        # de Yupoo porque pueden ser necesarios.
+        album_url = urljoin(
+            BASE_URL,
+            href
+        )
 
-        match = re.search(r"/albums/(\d+)", album_url)
+        match = re.search(
+            r"/albums/(\d+)",
+            album_url
+        )
 
-        if match:
-            album_id = match.group(1)
-            albums.add((album_id, album_url))
+        if not match:
+            continue
+
+        album_id = match.group(1)
+
+        if album_id not in albums:
+
+            albums[album_id] = album_url
 
     return albums
 
+# ============================================================
+# TÍTULO
+# ============================================================
 
 def obtener_titulo(soup):
 
+    # OG TITLE
     og_title = soup.find(
         "meta",
         property="og:title"
     )
 
-    if og_title and og_title.get("content"):
-        titulo = og_title["content"].strip()
+    if og_title:
 
-        if titulo:
-            return titulo
+        contenido = og_title.get(
+            "content"
+        )
 
+        if contenido:
+
+            titulo = contenido.strip()
+
+            if titulo:
+                return titulo
+
+    # TITLE
     if soup.title:
 
         titulo = soup.title.get_text(
@@ -163,9 +233,11 @@ def obtener_titulo(soup):
         if titulo:
             return titulo
 
+    # H1
     h1 = soup.find("h1")
 
     if h1:
+
         titulo = h1.get_text(
             " ",
             strip=True
@@ -176,6 +248,9 @@ def obtener_titulo(soup):
 
     return "Nuevo producto"
 
+# ============================================================
+# IMÁGENES
+# ============================================================
 
 def encontrar_imagenes(soup):
 
@@ -195,7 +270,9 @@ def encontrar_imagenes(soup):
 
         for atributo in atributos:
 
-            url = tag.get(atributo)
+            url = tag.get(
+                atributo
+            )
 
             if not url:
                 continue
@@ -208,6 +285,8 @@ def encontrar_imagenes(soup):
                 "/"
             )
 
+            # Intentar obtener una versión
+            # de tamaño medio.
             url = re.sub(
                 r"/(small|thumb|square|big|large)\.",
                 "/medium.",
@@ -216,15 +295,21 @@ def encontrar_imagenes(soup):
             )
 
             if url not in imagenes:
-                imagenes.append(url)
+
+                imagenes.append(
+                    url
+                )
 
     return imagenes
 
 # ============================================================
-# IMÁGENES
+# DESCARGAR IMÁGENES
 # ============================================================
 
-def descargar_imagen(url, numero):
+def descargar_imagen(
+    url,
+    numero
+):
 
     try:
 
@@ -235,7 +320,7 @@ def descargar_imagen(url, numero):
         )
 
         print(
-            "IMAGEN:",
+            "IMAGEN",
             numero,
             "HTTP:",
             response.status_code
@@ -255,18 +340,30 @@ def descargar_imagen(url, numero):
         ).lower()
 
         if "png" in content_type:
+
             extension = ".png"
 
         elif "webp" in content_type:
+
             extension = ".webp"
 
-        filename = f"image_{numero}{extension}"
+        filename = (
+            f"image_{numero}{extension}"
+        )
 
         with open(
             filename,
             "wb"
         ) as f:
-            f.write(response.content)
+
+            f.write(
+                response.content
+            )
+
+        print(
+            "✅ Descargada:",
+            filename
+        )
 
         return filename
 
@@ -280,30 +377,42 @@ def descargar_imagen(url, numero):
         return None
 
 
-def borrar_archivos(archivos):
+def borrar_archivos(
+    archivos
+):
 
     for archivo in archivos:
 
         try:
-            os.remove(archivo)
+
+            os.remove(
+                archivo
+            )
+
         except Exception:
+
             pass
 
 # ============================================================
 # TELEGRAM
 # ============================================================
 
-def telegram_url(method):
+def telegram_url(
+    metodo
+):
 
     return (
         "https://api.telegram.org/bot"
         + TELEGRAM_BOT_TOKEN
         + "/"
-        + method
+        + metodo
     )
 
 
-def enviar_producto(titulo, archivos):
+def enviar_producto(
+    titulo,
+    archivos
+):
 
     if not archivos:
         return False
@@ -315,7 +424,7 @@ def enviar_producto(titulo, archivos):
     )
 
     # --------------------------------------------------------
-    # UNA SOLA FOTO
+    # UNA SOLA IMAGEN
     # --------------------------------------------------------
 
     if len(archivos) == 1:
@@ -326,7 +435,9 @@ def enviar_producto(titulo, archivos):
         ) as foto:
 
             response = requests.post(
-                telegram_url("sendPhoto"),
+                telegram_url(
+                    "sendPhoto"
+                ),
                 data={
                     "chat_id": TELEGRAM_CHAT_ID,
                     "caption": caption,
@@ -351,7 +462,7 @@ def enviar_producto(titulo, archivos):
         return response.ok
 
     # --------------------------------------------------------
-    # VARIAS FOTOS
+    # VARIAS IMÁGENES
     # --------------------------------------------------------
 
     grupos = [
@@ -370,21 +481,28 @@ def enviar_producto(titulo, archivos):
         media = []
         files = {}
 
-        for i, archivo in enumerate(grupo):
+        for i, archivo in enumerate(
+            grupo
+        ):
 
             campo = f"photo{i}"
 
-            media_item = {
+            elemento = {
                 "type": "photo",
                 "media": f"attach://{campo}"
             }
 
-            if primer_grupo and i == 0:
+            if (
+                primer_grupo
+                and i == 0
+            ):
 
-                media_item["caption"] = caption
-                media_item["parse_mode"] = "HTML"
+                elemento["caption"] = caption
+                elemento["parse_mode"] = "HTML"
 
-            media.append(media_item)
+            media.append(
+                elemento
+            )
 
             files[campo] = open(
                 archivo,
@@ -394,10 +512,14 @@ def enviar_producto(titulo, archivos):
         try:
 
             response = requests.post(
-                telegram_url("sendMediaGroup"),
+                telegram_url(
+                    "sendMediaGroup"
+                ),
                 data={
                     "chat_id": TELEGRAM_CHAT_ID,
-                    "media": json.dumps(media)
+                    "media": json.dumps(
+                        media
+                    )
                 },
                 files=files,
                 timeout=120
@@ -414,11 +536,13 @@ def enviar_producto(titulo, archivos):
             )
 
             if not response.ok:
+
                 return False
 
         finally:
 
             for archivo in files.values():
+
                 archivo.close()
 
         primer_grupo = False
@@ -441,7 +565,11 @@ def main():
     print()
 
     if not TELEGRAM_BOT_TOKEN:
-        print("❌ FALTA TELEGRAM_BOT_TOKEN")
+
+        print(
+            "❌ FALTA TELEGRAM_BOT_TOKEN"
+        )
+
         return
 
     publicados = cargar_publicados()
@@ -454,7 +582,7 @@ def main():
     todos_albums = {}
 
     # --------------------------------------------------------
-    # BUSCAR CATEGORÍAS
+    # BUSCAR PRODUCTOS
     # --------------------------------------------------------
 
     for categoria in CATEGORIES:
@@ -474,10 +602,17 @@ def main():
             len(albums)
         )
 
-        for album_id, album_url in albums:
+        for album_id, album_url in albums.items():
 
             if album_id not in todos_albums:
-                todos_albums[album_id] = album_url
+
+                todos_albums[
+                    album_id
+                ] = album_url
+
+    # --------------------------------------------------------
+    # RESUMEN
+    # --------------------------------------------------------
 
     print()
     print("==========================================")
@@ -528,7 +663,7 @@ def main():
     publicados_ahora = 0
 
     # --------------------------------------------------------
-    # PROCESAR PRODUCTOS
+    # PUBLICAR PRODUCTOS
     # --------------------------------------------------------
 
     for numero, producto in enumerate(
@@ -558,10 +693,12 @@ def main():
 
         try:
 
+            # Abrir álbum
             soup = obtener_soup(
                 album_url
             )
 
+            # Título
             titulo = obtener_titulo(
                 soup
             )
@@ -571,6 +708,7 @@ def main():
                 titulo
             )
 
+            # Imágenes
             imagenes = encontrar_imagenes(
                 soup
             )
@@ -583,12 +721,12 @@ def main():
             if not imagenes:
 
                 print(
-                    "⚠️ No hay imágenes."
+                    "⚠️ No se encontraron imágenes."
                 )
 
                 continue
 
-            # Descargar todas las imágenes
+            # Descargar imágenes
             for i, imagen_url in enumerate(
                 imagenes,
                 start=1
@@ -600,6 +738,7 @@ def main():
                 )
 
                 if archivo:
+
                     archivos.append(
                         archivo
                     )
@@ -618,6 +757,7 @@ def main():
 
                 continue
 
+            # Publicar
             print()
             print(
                 "📤 PUBLICANDO EN TELEGRAM..."
@@ -634,6 +774,8 @@ def main():
                     "✅ PRODUCTO PUBLICADO"
                 )
 
+                # Solo guardamos el ID si
+                # Telegram confirmó el envío.
                 publicados.add(
                     album_id
                 )
@@ -647,14 +789,14 @@ def main():
             else:
 
                 print(
-                    "❌ Telegram no confirmó "
-                    "el envío."
+                    "❌ TELEGRAM NO CONFIRMÓ "
+                    "EL ENVÍO."
                 )
 
         except Exception as e:
 
             print(
-                "❌ ERROR:",
+                "❌ ERROR EN PRODUCTO:",
                 e
             )
 
@@ -666,22 +808,30 @@ def main():
 
         time.sleep(3)
 
+    # --------------------------------------------------------
+    # RESUMEN FINAL
+    # --------------------------------------------------------
+
     print()
     print("==========================================")
     print(" RESUMEN FINAL")
     print("==========================================")
     print()
+
     print(
         "Publicados ahora:",
         publicados_ahora
     )
+
     print(
         "Total registrados:",
         len(publicados)
     )
+
     print()
     print("==========================================")
 
 
 if __name__ == "__main__":
+
     main()
